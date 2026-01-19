@@ -7,7 +7,6 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "strict": true,
-    "types": ["node"],
     "outDir": "dist"
   },
   "include": ["src"]
