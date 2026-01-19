@@ -1,0 +1,16 @@
+app = "fileshare-rle-hq"
+primary_region = "ams"
+
+[build]
+  # No specific build, let Fly.io auto-detect
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[processes]
+  app = "npm run start --workspace apps/server"
