@@ -1,0 +1,15 @@
+{
+  "name": "cloudbeam-share",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/frontend",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace apps/frontend",
+    "dev:server": "npm run dev --workspace apps/server",
+    "build": "npm run build --workspace apps/frontend && npm run build --workspace apps/server",
+    "format": "npm run format --workspace apps/frontend"
+  }
+}
