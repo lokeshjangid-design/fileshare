@@ -77,6 +77,52 @@ app.get('/api/session/by-pin/:pin', (req: Request, res: Response) => {
   res.json(record);
 });
 
+// Download individual file
+app.get('/api/download/:sessionId/:fileId', (req: Request, res: Response) => {
+  const { sessionId, fileId } = req.params as { sessionId: string; fileId: string };
+  
+  const session = sessions.get(sessionId);
+  if (!session) return res.status(404).json({ message: 'Session not found' });
+  
+  if (session.expiresAt < Date.now()) {
+    return res.status(410).json({ message: 'Session expired' });
+  }
+  
+  const file = session.files.find(f => f.id === fileId);
+  if (!file) return res.status(404).json({ message: 'File not found' });
+  
+  // For now, return a placeholder response
+  // In a real implementation, you'd serve the actual file
+  res.json({ 
+    message: 'File download placeholder',
+    fileName: file.name,
+    fileSize: file.size,
+    note: 'Actual file serving not implemented in this demo'
+  });
+});
+
+// Download all files as zip
+app.get('/api/download/:sessionId/all', (req: Request, res: Response) => {
+  const { sessionId } = req.params as { sessionId: string };
+  
+  const session = sessions.get(sessionId);
+  if (!session) return res.status(404).json({ message: 'Session not found' });
+  
+  if (session.expiresAt < Date.now()) {
+    return res.status(410).json({ message: 'Session expired' });
+  }
+  
+  // For now, return a placeholder response
+  // In a real implementation, you'd create and serve a zip file
+  res.json({ 
+    message: 'Zip download placeholder',
+    fileCount: session.files.length,
+    totalSize: session.files.reduce((acc, file) => acc + (file.size || 0), 0),
+    files: session.files.map(f => ({ name: f.name, size: f.size })),
+    note: 'Actual zip file creation not implemented in this demo'
+  });
+});
+
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 

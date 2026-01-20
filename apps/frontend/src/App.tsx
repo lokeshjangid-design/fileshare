@@ -1,6 +1,7 @@
 import type { ChangeEvent, DragEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import QRCode from 'react-qr-code';
 import {
   ArrowLeft,
   Check,
@@ -33,22 +34,24 @@ type Role = 'sender' | 'receiver' | null;
 
 type SessionStatus = 'idle' | 'uploading' | 'ready';
 
-const sampleReceiverManifest = {
-  senderDevice: 'MacBook Pro',
-  expiresIn: '9m left',
-  files: [
-    { id: 'doc', name: 'Brand Guidelines.pdf', size: 12_450_332 },
-    { id: 'photos', name: 'Launch Photos.zip', size: 187_904_819 },
-    { id: 'video', name: 'Demo.mov', size: 640_120_402 },
-  ],
-};
-
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+};
+
+const formatExpiryLabel = (expiresAt: number) => {
+  const diffMs = expiresAt - Date.now();
+  if (diffMs <= 0) return 'Expired';
+  const minutes = Math.max(1, Math.floor(diffMs / 60000));
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins === 0 ? `${hours}h left` : `${hours}h ${mins}m left`;
+  }
+  return `${minutes}m left`;
 };
 
 const App = () => {
@@ -72,11 +75,22 @@ const App = () => {
   const [receiverSession, setReceiverSession] = useState<ApiSessionRecord | null>(null);
   const [receiverError, setReceiverError] = useState<string | null>(null);
   const [receiverLoading, setReceiverLoading] = useState(false);
+  const [copyState, setCopyState] = useState({ code: false, link: false });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.body.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const pinFromUrl = params.get('pin');
+    if (pinFromUrl && /^\d{6}$/.test(pinFromUrl)) {
+      setRole('receiver');
+      setReceiverCode(pinFromUrl);
+    }
+  }, []);
 
   useEffect(() => {
     if (sessionStatus !== 'uploading') {
@@ -89,7 +103,6 @@ const App = () => {
         if (prev >= 100) {
           window.clearInterval(progressTimerRef.current);
           setSessionStatus('ready');
-          setShareLink(`${window.location.origin}/join/${generatedCode ?? ''}`);
           return 100;
         }
         return prev + 4;
@@ -152,6 +165,38 @@ const App = () => {
     if (navigator.userAgent.includes('Win')) return 'Windows PC';
     return 'This device';
   }, []);
+
+  const receiverFiles = receiverSession?.files ?? [];
+  const receiverDeviceName = receiverSession?.deviceName ?? '';
+  const receiverExpiryLabel = receiverSession
+    ? formatExpiryLabel(receiverSession.expiresAt)
+    : '';
+  const receiverTotalBytes = receiverFiles.reduce((acc, file) => acc + (file.size ?? 0), 0);
+  const receiverNeedsPassword = receiverSession?.requiresPassword ?? false;
+
+  const shareLinkForPin = (pin: string) => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const url = new URL(window.location.origin);
+      url.searchParams.set('pin', pin);
+      return `${url.origin}?pin=${pin}`;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleCopy = async (value: string, key: 'code' | 'link') => {
+    if (!value || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyState((prev) => ({ ...prev, [key]: true }));
+      window.setTimeout(() => {
+        setCopyState((prev) => ({ ...prev, [key]: false }));
+      }, 1500);
+    } catch {
+      setSessionError('Unable to copy to clipboard');
+    }
+  };
 
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
@@ -415,21 +460,43 @@ const App = () => {
               {generatedCode && (
                 <div className="space-y-4 rounded-3xl border border-blue-500/20 bg-blue-500/5 p-6 text-center">
                   <p className="text-sm uppercase tracking-[0.4em] text-blue-200">Share this code</p>
-                  <div className="text-5xl font-semibold tracking-[0.2em] text-blue-100">
-                    {generatedCode}
-                  </div>
-                  <div className="flex items-center justify-center gap-3 text-sm text-blue-100">
-                    <QrCode className="h-5 w-5" />
-                    QR available once upload finishes
-                  </div>
-                  {sessionStatus === 'ready' && shareLink && (
-                    <div className="space-y-3">
-                      <p className="text-sm text-blue-100">Or share this link</p>
-                      <div className="rounded-2xl border border-white/10 bg-white/10 p-3 text-xs">
-                        {shareLink}
-                      </div>
+                  <div className="flex items-center justify-center gap-4">
+                    <div className="text-5xl font-semibold tracking-[0.2em] text-blue-100">
+                      {generatedCode}
                     </div>
-                  )}
+                    <button
+                      onClick={() => handleCopy(generatedCode, 'code')}
+                      className="rounded-xl border border-white/10 bg-white/10 p-2 text-blue-100 transition hover:bg-white/20"
+                      title="Copy code"
+                    >
+                      {copyState.code ? <Check className="h-5 w-5" /> : <RefreshCw className="h-5 w-5" />}
+                    </button>
+                  </div>
+                  <div className="mt-4 flex justify-center">
+                    <div className="rounded-2xl bg-white p-2">
+                      <QRCode
+                        value={shareLinkForPin(generatedCode) ?? ''}
+                        size={128}
+                        bgColor="#ffffff"
+                        fgColor="#000000"
+                        level="M"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-blue-100">Scan QR or share the code</p>
+                  <div className="space-y-2">
+                    <p className="text-sm text-blue-100">Or share this link</p>
+                    <div className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 p-2">
+                      <span className="flex-1 truncate text-xs">{shareLinkForPin(generatedCode)}</span>
+                      <button
+                        onClick={() => handleCopy(shareLinkForPin(generatedCode) ?? '', 'link')}
+                        className="rounded-lg border border-white/10 bg-white/10 p-1 text-blue-100 transition hover:bg-white/20"
+                        title="Copy link"
+                      >
+                        {copyState.link ? <Check className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -500,35 +567,31 @@ const App = () => {
 
             <div className="space-y-6">
               <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-400">Sender device</p>
-                    <p className="text-2xl font-semibold">{sampleReceiverManifest.senderDevice}</p>
-                  </div>
-                  <ArrowLeft className="h-10 w-10 text-slate-500" />
-                </div>
+                {receiverDeviceName ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-slate-400">Sender device</p>
+                        <p className="text-2xl font-semibold">{receiverDeviceName}</p>
+                      </div>
+                      <ArrowLeft className="h-10 w-10 text-slate-500" />
+                    </div>
 
-                {downloadReady ? (
+                    {downloadReady ? (
                   <div className="mt-6 space-y-4">
                     <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div>
                         <p className="text-sm text-slate-400">Files ready</p>
                         <p className="text-lg font-semibold">
-                          {sampleReceiverManifest.files.length} items ·{' '}
-                          {formatBytes(
-                            sampleReceiverManifest.files.reduce(
-                              (acc, file) => acc + file.size,
-                              0
-                            )
-                          )}
+                          {receiverFiles.length} items · {formatBytes(receiverTotalBytes)}
                         </p>
                       </div>
                       <span className="text-xs uppercase tracking-[0.3em] text-emerald-300">
-                        {sampleReceiverManifest.expiresIn}
+                        {receiverExpiryLabel}
                       </span>
                     </div>
 
-                    {passwordEnabled && (
+                    {receiverNeedsPassword && (
                       <input
                         type="password"
                         placeholder="Enter password"
@@ -541,32 +604,79 @@ const App = () => {
                     )}
 
                     <ul className="space-y-3">
-                      {sampleReceiverManifest.files.map((file) => (
-                        <li
-                          key={file.id}
-                          className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                        >
-                          <div>
-                            <p className="font-medium">{file.name}</p>
-                            <p className="text-sm text-slate-400">{formatBytes(file.size)}</p>
-                          </div>
-                          <button className="text-sm text-blue-300">Download</button>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-6 space-y-4">
+                      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div>
+                          <p className="text-sm text-slate-400">Files ready</p>
+                          <p className="text-lg font-semibold">
+                            {receiverFiles.length} items · {formatBytes(receiverTotalBytes)}
+                          </p>
+                        </div>
+                        {receiverExpiryLabel && (
+                          <span className="text-xs uppercase tracking-[0.3em] text-emerald-300">
+                            {receiverExpiryLabel}
+                          </span>
+                        )}
+                      </div>
 
-                    <button className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-lime-500 py-3 font-semibold text-emerald-950">
-                      <DownloadCloud className="h-5 w-5" />
-                      Download everything
-                    </button>
-                  </div>
+                      {receiverNeedsPassword && (
+                        <input
+                          type="password"
+                          placeholder="Enter password"
+                          value={receiverPassword}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setReceiverPassword(event.target.value)
+                          }
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none"
+                        />
+                      )}
+
+                      {receiverFiles.length > 0 ? (
+                        <ul className="space-y-3">
+                          {receiverFiles.map((file) => (
+                            <li
+                              key={file.id}
+                              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                            >
+                              <div>
+                                <p className="font-medium">{file.name}</p>
+                                <p className="text-sm text-slate-400">{formatBytes(file.size ?? 0)}</p>
+                              </div>
+                              <button className="text-sm text-blue-300">Download</button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-3 text-center text-sm text-slate-400">
+                          Sender hasn’t attached any files yet.
+                        </div>
+                      )}
+
+                      <button
+                        className={clsx(
+                          'flex w-full items-center justify-center gap-3 rounded-2xl py-3 font-semibold transition',
+                          receiverFiles.length
+                            ? 'bg-gradient-to-r from-emerald-500 to-lime-500 text-emerald-950'
+                            : 'cursor-not-allowed border border-white/10 text-slate-400'
+                        )}
+                        disabled={!receiverFiles.length}
+                      >
+                        <DownloadCloud className="h-5 w-5" />
+                        Download everything
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <div className="mt-8 space-y-5 text-center">
                     <div className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-xs uppercase tracking-[0.3em] text-slate-400">
-                      Waiting for code
+                      {receiverLoading
+                        ? 'Checking code…'
+                        : receiverError ?? 'Waiting for code'}
                     </div>
                     <p className="text-lg font-semibold">
-                      Enter the 6-digit code from the sender to preview files.
+                      {receiverError
+                        ? 'This code was not found. Ask the sender for a new one.'
+                        : 'Enter the 6-digit code from the sender to preview files.'}
                     </p>
                   </div>
                 )}
