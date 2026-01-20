@@ -207,12 +207,24 @@ app.get('/api/download/:sessionId/all', (req: Request, res: Response) => {
     return res.status(404).json({ message: 'Session not found' });
   }
   
+  console.log('Session found:', {
+    id: session.id,
+    fileCount: session.files.length,
+    files: session.files.map(f => ({ id: f.id, name: f.name, path: f.path }))
+  });
+  
   if (session.expiresAt < Date.now()) {
     return res.status(410).json({ message: 'Session expired' });
   }
   
   // Filter files that actually exist on disk
-  const existingFiles = session.files.filter(file => file.path && fs.existsSync(file.path));
+  const existingFiles = session.files.filter(file => {
+    const exists = file.path && fs.existsSync(file.path);
+    console.log(`File ${file.name} at path ${file.path}: exists=${exists}`);
+    return exists;
+  });
+  
+  console.log(`Found ${existingFiles.length} existing files out of ${session.files.length}`);
   
   if (existingFiles.length === 0) {
     return res.status(404).json({ message: 'No files found to download' });
@@ -237,6 +249,7 @@ app.get('/api/download/:sessionId/all', (req: Request, res: Response) => {
   // Add each file to the zip
   existingFiles.forEach((file) => {
     if (file.path) {
+      console.log(`Adding file to zip: ${file.name} from ${file.path}`);
       archive.file(file.path, { name: file.name });
     }
   });
