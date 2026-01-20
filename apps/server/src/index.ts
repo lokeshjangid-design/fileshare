@@ -61,6 +61,20 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+// Debug endpoint to list all sessions
+app.get('/api/debug/sessions', (_req: Request, res: Response) => {
+  const sessionList = Array.from(sessions.entries()).map(([id, session]) => ({
+    id,
+    pin: session.pin,
+    deviceName: session.deviceName,
+    status: session.status,
+    expiresAt: session.expiresAt,
+    fileCount: session.files.length,
+    files: session.files.map(f => ({ id: f.id, name: f.name, hasPath: !!f.path }))
+  }));
+  res.json({ sessions: sessionList, total: sessionList.length });
+});
+
 // Upload files first, then create session
 app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => {
   try {
@@ -147,7 +161,7 @@ app.get('/api/session/by-pin/:pin', (req: Request, res: Response) => {
 
 // Download individual file
 app.get('/api/download/:sessionId/:fileId', (req: Request, res: Response) => {
-  const { sessionId, fileId } = req.params as { sessionId: string; fileId: string };
+  const { sessionId, fileId } = req.params;
   
   const session = sessions.get(sessionId);
   if (!session) return res.status(404).json({ message: 'Session not found' });
@@ -183,10 +197,15 @@ app.get('/api/download/:sessionId/:fileId', (req: Request, res: Response) => {
 
 // Download all files as zip
 app.get('/api/download/:sessionId/all', (req: Request, res: Response) => {
-  const { sessionId } = req.params as { sessionId: string };
+  const { sessionId } = req.params;
+  
+  console.log('Download request for session:', sessionId); // Debug log
   
   const session = sessions.get(sessionId);
-  if (!session) return res.status(404).json({ message: 'Session not found' });
+  if (!session) {
+    console.log('Session not found:', sessionId); // Debug log
+    return res.status(404).json({ message: 'Session not found' });
+  }
   
   if (session.expiresAt < Date.now()) {
     return res.status(410).json({ message: 'Session expired' });
