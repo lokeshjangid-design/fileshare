@@ -116,18 +116,40 @@ app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => 
       return res.status(400).json({ message: 'No files uploaded' });
     }
 
-    const filesMeta: FileMeta[] = files.map((file, index) => ({
-      id: `${file.originalname}-${file.size}-${index}`,
-      name: file.originalname,
-      size: file.size,
-      type: file.mimetype,
-      path: file.path
-    }));
+    // Generate session ID first
+    const sessionId = nanoid(12);
+    const sessionDir = path.join(uploadsDir, sessionId);
+    
+    // Ensure session directory exists
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
+    }
 
-    // Store temporary session data
-    const tempSessionId = nanoid(12);
-    sessions.set(tempSessionId, {
-      id: tempSessionId,
+    const filesMeta: FileMeta[] = files.map((file, index) => {
+      // Move file from temp location to session directory
+      const oldPath = file.path;
+      const newPath = path.join(sessionDir, file.filename);
+      
+      console.log(`Moving file from ${oldPath} to ${newPath}`);
+      
+      // Copy file to new location
+      fs.copyFileSync(oldPath, newPath);
+      
+      // Clean up temp file
+      fs.unlinkSync(oldPath);
+      
+      return {
+        id: `${file.originalname}-${file.size}-${index}`,
+        name: file.originalname,
+        size: file.size,
+        type: file.mimetype,
+        path: newPath
+      };
+    });
+
+    // Store session data
+    sessions.set(sessionId, {
+      id: sessionId,
       pin: '',
       deviceName: '',
       expiresAt: Date.now() + 300000, // 5 minutes for temp session
@@ -135,8 +157,10 @@ app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => 
       files: filesMeta
     });
 
+    console.log(`Uploaded ${files.length} files to session ${sessionId}`);
+
     res.json({
-      tempSessionId,
+      tempSessionId: sessionId,
       files: filesMeta
     });
   } catch (error) {
