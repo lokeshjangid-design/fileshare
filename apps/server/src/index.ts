@@ -216,43 +216,7 @@ app.get('/api/session/by-pin/:pin', (req: Request, res: Response) => {
   res.json(record);
 });
 
-// Download individual file
-app.get('/api/download/:sessionId/:fileId', (req: Request, res: Response) => {
-  const { sessionId, fileId } = req.params;
-  
-  const session = sessions.get(sessionId);
-  if (!session) return res.status(404).json({ message: 'Session not found' });
-  
-  if (session.expiresAt < Date.now()) {
-    return res.status(410).json({ message: 'Session expired' });
-  }
-  
-  const file = session.files.find(f => f.id === fileId);
-  if (!file || !file.path) return res.status(404).json({ message: 'File not found' });
-  
-  // Check if file exists
-  if (!fs.existsSync(file.path)) {
-    return res.status(404).json({ message: 'File not found on server' });
-  }
-  
-  // Set headers for file download
-  res.setHeader('Content-Type', file.type);
-  res.setHeader('Content-Disposition', `attachment; filename="${file.name}"`);
-  res.setHeader('Content-Length', file.size.toString());
-  
-  // Stream the file
-  const fileStream = fs.createReadStream(file.path);
-  fileStream.pipe(res);
-  
-  fileStream.on('error', (error) => {
-    console.error('File stream error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ message: 'Error serving file' });
-    }
-  });
-});
-
-// Download all files as zip
+// Download all files as zip (define before single file route so this pattern wins)
 app.get('/api/download/:sessionId/all', (req: Request, res: Response) => {
   const { sessionId } = req.params;
   
@@ -312,6 +276,42 @@ app.get('/api/download/:sessionId/all', (req: Request, res: Response) => {
   });
   
   archive.finalize();
+});
+
+// Download individual file
+app.get('/api/download/:sessionId/:fileId', (req: Request, res: Response) => {
+  const { sessionId, fileId } = req.params;
+  
+  const session = sessions.get(sessionId);
+  if (!session) return res.status(404).json({ message: 'Session not found' });
+  
+  if (session.expiresAt < Date.now()) {
+    return res.status(410).json({ message: 'Session expired' });
+  }
+  
+  const file = session.files.find(f => f.id === fileId);
+  if (!file || !file.path) return res.status(404).json({ message: 'File not found' });
+  
+  // Check if file exists
+  if (!fs.existsSync(file.path)) {
+    return res.status(404).json({ message: 'File not found on server' });
+  }
+  
+  // Set headers for file download
+  res.setHeader('Content-Type', file.type);
+  res.setHeader('Content-Disposition', `attachment; filename="${file.name}"`);
+  res.setHeader('Content-Length', file.size.toString());
+  
+  // Stream the file
+  const fileStream = fs.createReadStream(file.path);
+  fileStream.pipe(res);
+  
+  fileStream.on('error', (error) => {
+    console.error('File stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error serving file' });
+    }
+  });
 });
 
 const httpServer = createServer(app);
