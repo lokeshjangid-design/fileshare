@@ -302,16 +302,15 @@ app.get('/api/download/:sessionId/:fileId', (req: Request, res: Response) => {
   res.setHeader('Content-Disposition', `attachment; filename="${file.name}"`);
   res.setHeader('Content-Length', file.size.toString());
   
-  // Stream the file
+  // Stream the file in chunks
   const fileStream = fs.createReadStream(file.path);
-  fileStream.pipe(res);
-  
   fileStream.on('error', (error) => {
     console.error('File stream error:', error);
     if (!res.headersSent) {
       res.status(500).json({ message: 'Error serving file' });
     }
   });
+  fileStream.pipe(res);
 });
 
 const httpServer = createServer(app);
