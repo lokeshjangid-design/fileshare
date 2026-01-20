@@ -75,6 +75,39 @@ app.get('/api/debug/sessions', (_req: Request, res: Response) => {
   res.json({ sessions: sessionList, total: sessionList.length });
 });
 
+// Debug endpoint to check upload directory
+app.get('/api/debug/uploads', (_req: Request, res: Response) => {
+  try {
+    const sessionDirs = fs.readdirSync(uploadsDir);
+    const result: {
+      uploadsDir: string;
+      sessionDirs: Array<{ sessionId: string; files: string[]; fileCount: number }>;
+      totalFiles: number;
+    } = {
+      uploadsDir,
+      sessionDirs: [],
+      totalFiles: 0
+    };
+    
+    sessionDirs.forEach(sessionId => {
+      const sessionDir = path.join(uploadsDir, sessionId);
+      if (fs.statSync(sessionDir).isDirectory()) {
+        const files = fs.readdirSync(sessionDir);
+        result.sessionDirs.push({
+          sessionId,
+          files: files,
+          fileCount: files.length
+        });
+        result.totalFiles += files.length;
+      }
+    });
+    
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+});
+
 // Upload files first, then create session
 app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => {
   try {
