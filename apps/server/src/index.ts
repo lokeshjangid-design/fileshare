@@ -25,13 +25,33 @@ type SessionRecord = {
   files: FileMeta[];
 };
 
+type ActiveUpload = {
+  id: string;
+  sessionId: string;
+  fileName: string;
+  size: number;
+  type: string;
+  chunkSize: number;
+  totalChunks: number;
+  tempDir: string;
+  receivedChunks: Set<number>;
+};
+
+const TEMP_SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes to allow large uploads
+const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024; // 8MB
+
 const sessions = new Map<string, SessionRecord>();
 const pinIndex = new Map<string, string>();
+const activeUploads = new Map<string, ActiveUpload>();
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+}
+const uploadsChunkDir = path.join(uploadsDir, 'chunks');
+if (!fs.existsSync(uploadsChunkDir)) {
+  fs.mkdirSync(uploadsChunkDir, { recursive: true });
 }
 
 // Configure multer for file uploads
@@ -108,7 +128,25 @@ app.get('/api/debug/uploads', (_req: Request, res: Response) => {
   }
 });
 
-// Upload files first, then create session
+function ensurePendingSession(sessionId: string) {
+  const existing = sessions.get(sessionId);
+  if (existing) {
+    existing.expiresAt = Date.now() + TEMP_SESSION_TTL_MS;
+    return existing;
+  }
+  const record: SessionRecord = {
+    id: sessionId,
+    pin: '',
+    deviceName: '',
+    expiresAt: Date.now() + TEMP_SESSION_TTL_MS,
+    status: 'pending',
+    files: [],
+  };
+  sessions.set(sessionId, record);
+  return record;
+}
+
+// Upload files first, then create session (legacy flow - kept for compatibility)
 app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => {
   try {
     const files = req.files as Express.Multer.File[];
@@ -152,7 +190,7 @@ app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => 
       id: sessionId,
       pin: '',
       deviceName: '',
-      expiresAt: Date.now() + 300000, // 5 minutes for temp session
+      expiresAt: Date.now() + TEMP_SESSION_TTL_MS,
       status: 'pending',
       files: filesMeta
     });
@@ -166,6 +204,141 @@ app.post('/api/upload', upload.array('files'), (req: Request, res: Response) => 
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({ message: 'Upload failed' });
+  }
+});
+
+// Chunked upload initialization
+app.post('/api/upload/init', (req: Request, res: Response) => {
+  const { fileName, fileSize, mimeType, sessionId } = req.body as {
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
+    sessionId?: string;
+  };
+
+  if (!fileName || !fileSize || fileSize <= 0) {
+    return res.status(400).json({ message: 'Invalid file metadata' });
+  }
+
+  const assignedSessionId = sessionId || nanoid(12);
+  ensurePendingSession(assignedSessionId);
+
+  const uploadId = nanoid(16);
+  const chunkSize = DEFAULT_CHUNK_SIZE;
+  const totalChunks = Math.ceil(fileSize / chunkSize);
+  const tempDir = path.join(uploadsChunkDir, uploadId);
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  activeUploads.set(uploadId, {
+    id: uploadId,
+    sessionId: assignedSessionId,
+    fileName,
+    size: fileSize,
+    type: mimeType || 'application/octet-stream',
+    chunkSize,
+    totalChunks,
+    tempDir,
+    receivedChunks: new Set(),
+  });
+
+  res.json({ uploadId, sessionId: assignedSessionId, chunkSize, totalChunks });
+});
+
+const chunkUploadMiddleware = express.raw({ type: 'application/octet-stream', limit: '50mb' });
+
+// Receive individual chunk
+app.post('/api/upload/chunk', chunkUploadMiddleware, (req: Request, res: Response) => {
+  const uploadId = req.headers['x-upload-id'];
+  const chunkIndexHeader = req.headers['x-chunk-index'];
+
+  if (!uploadId || typeof uploadId !== 'string') {
+    return res.status(400).json({ message: 'Missing upload id' });
+  }
+  if (chunkIndexHeader === undefined) {
+    return res.status(400).json({ message: 'Missing chunk index' });
+  }
+
+  const chunkIndex = Number(chunkIndexHeader);
+  if (Number.isNaN(chunkIndex) || chunkIndex < 0) {
+    return res.status(400).json({ message: 'Invalid chunk index' });
+  }
+
+  const upload = activeUploads.get(uploadId);
+  if (!upload) {
+    return res.status(404).json({ message: 'Upload session not found' });
+  }
+
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ message: 'Empty chunk data' });
+  }
+
+  const chunkPath = path.join(upload.tempDir, `chunk-${chunkIndex}`);
+  try {
+    fs.writeFileSync(chunkPath, req.body);
+    upload.receivedChunks.add(chunkIndex);
+    res.json({ received: chunkIndex });
+  } catch (error) {
+    console.error('Failed to write chunk', error);
+    res.status(500).json({ message: 'Failed to store chunk' });
+  }
+});
+
+// Finalize chunked upload
+app.post('/api/upload/complete', async (req: Request, res: Response) => {
+  const { uploadId } = req.body as { uploadId?: string };
+  if (!uploadId) {
+    return res.status(400).json({ message: 'Missing upload id' });
+  }
+
+  const upload = activeUploads.get(uploadId);
+  if (!upload) {
+    return res.status(404).json({ message: 'Upload session not found' });
+  }
+
+  if (upload.receivedChunks.size !== upload.totalChunks) {
+    return res.status(400).json({ message: 'Not all chunks uploaded' });
+  }
+
+  const session = sessions.get(upload.sessionId);
+  if (!session) {
+    return res.status(404).json({ message: 'Session not found for upload' });
+  }
+
+  const sessionDir = path.join(uploadsDir, upload.sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const safeName = path.basename(upload.fileName);
+  const finalPath = path.join(sessionDir, `${Date.now()}-${safeName}`);
+
+  try {
+    // Ensure file exists before appending chunks
+    fs.writeFileSync(finalPath, Buffer.alloc(0));
+    for (let i = 0; i < upload.totalChunks; i++) {
+      const chunkPath = path.join(upload.tempDir, `chunk-${i}`);
+      if (!fs.existsSync(chunkPath)) {
+        return res.status(400).json({ message: `Missing chunk ${i}` });
+      }
+      const data = fs.readFileSync(chunkPath);
+      fs.appendFileSync(finalPath, data);
+      fs.unlinkSync(chunkPath);
+    }
+    fs.rmSync(upload.tempDir, { recursive: true, force: true });
+
+    const fileMeta: FileMeta = {
+      id: `${safeName}-${upload.size}-${Date.now()}`,
+      name: safeName,
+      size: upload.size,
+      type: upload.type,
+      path: finalPath,
+    };
+
+    session.files.push(fileMeta);
+    session.expiresAt = Date.now() + TEMP_SESSION_TTL_MS;
+    activeUploads.delete(uploadId);
+
+    res.json({ sessionId: session.id, file: fileMeta });
+  } catch (error) {
+    console.error('Failed to finalize upload', error);
+    res.status(500).json({ message: 'Failed to finalize upload' });
   }
 });
 
