@@ -54,6 +54,133 @@ const formatExpiryLabel = (expiresAt: number) => {
   return `${minutes}m left`;
 };
 
+const deviceName = useMemo((): string => {
+  if (typeof navigator === 'undefined') return 'This device';
+  const nav = navigator as any;
+  if ('userAgentData' in nav && nav.userAgentData && typeof nav.userAgentData === 'object' && 'platform' in nav.userAgentData) {
+    return String(nav.userAgentData.platform);
+  }
+  if (navigator.userAgent.includes('iPhone')) return 'iPhone';
+  if (navigator.userAgent.includes('Android')) return 'Android Device';
+  if (navigator.userAgent.includes('Mac')) return 'MacBook';
+  if (navigator.userAgent.includes('Win')) return 'Windows PC';
+  return 'This device';
+}, []);
+
+const RoleCard = ({
+  title,
+  description,
+  accent,
+  icon,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  accent: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}) => (
+  <button
+    onClick={onClick}
+    className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 text-left transition hover:border-white/40"
+    type="button"
+  >
+    <div className="pointer-events-none absolute inset-0 opacity-60">
+      <div className={clsx('absolute inset-0 rounded-3xl bg-gradient-to-br', accent)} />
+    </div>
+    <div className="relative flex h-full flex-col justify-between gap-4">
+      <div className="inline-flex items-center gap-3 rounded-full border border-white/20 px-4 py-1 text-xs uppercase tracking-[0.3em] text-white/80">
+        {icon}
+        {title}
+      </div>
+      <p className="text-lg text-white/90">{description}</p>
+    </div>
+  </button>
+);
+
+const StepperItem = ({ label, active }: { label: string; active?: boolean }) => (
+  <div
+    className={clsx(
+      'flex items-center gap-2 text-xs font-semibold tracking-[0.3em]',
+      active ? 'text-white' : 'text-slate-500'
+    )}
+  >
+    <span className={clsx('h-2 w-2 rounded-full', active ? 'bg-white' : 'bg-slate-600')} />
+    {label.toUpperCase()}
+  </div>
+);
+
+const ToggleCard = ({
+  title,
+  description,
+  icon,
+  active,
+  onToggle,
+}: {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  active?: boolean;
+  onToggle: () => void;
+}) => (
+  <button
+    onClick={onToggle}
+    type="button"
+    className={clsx(
+      'flex w-full items-start gap-4 rounded-3xl border px-5 py-4 text-left transition',
+      active
+        ? 'border-blue-500/40 bg-blue-500/10'
+        : 'border-white/10 bg-white/5 hover:border-white/30'
+    )}
+  >
+    <span
+      className={clsx(
+        'rounded-2xl p-3',
+        active ? 'bg-blue-500/20 text-blue-200' : 'bg-white/10 text-slate-200'
+      )}
+    >
+      {icon}
+    </span>
+    <div>
+      <p className="font-semibold">{title}</p>
+      <p className="text-sm text-slate-400">{description}</p>
+    </div>
+  </button>
+);
+
+const ProgressBar = ({ progress, status }: { progress: number; status: SessionStatus }) => (
+  <div className="space-y-3">
+    <div className="flex items-center justify-between text-sm text-slate-300">
+      <span>{status === 'ready' ? 'Upload complete' : 'Uploading files'}</span>
+      <span>{progress}%</span>
+    </div>
+    <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  </div>
+);
+
+const glassPanelClass =
+  'rounded-[32px] border border-white/10 bg-white/5 p-6 text-white shadow-glass backdrop-blur-xl';
+
+const styles = document.createElement('style');
+styles.innerHTML = `
+  .glass-panel {
+    border-radius: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 25px 60px rgba(5, 6, 10, 0.25);
+    backdrop-filter: blur(20px);
+  }
+`;
+if (typeof document !== 'undefined' && !document.getElementById('glass-style')) {
+  styles.id = 'glass-style';
+  document.head.appendChild(styles);
+};
+
 const App = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [role, setRole] = useState<Role>(null);
@@ -152,19 +279,6 @@ const App = () => {
     () => selectedFiles.reduce((acc, file) => acc + file.size, 0),
     [selectedFiles]
   );
-
-  const deviceName = useMemo(() => {
-    if (typeof navigator === 'undefined') return 'This device';
-    const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-    if (nav.userAgentData?.platform) {
-      return nav.userAgentData.platform;
-    }
-    if (navigator.userAgent.includes('iPhone')) return 'iPhone';
-    if (navigator.userAgent.includes('Android')) return 'Android Device';
-    if (navigator.userAgent.includes('Mac')) return 'MacBook';
-    if (navigator.userAgent.includes('Win')) return 'Windows PC';
-    return 'This device';
-  }, []);
 
   const receiverFiles = receiverSession?.files ?? [];
   const receiverDeviceName = receiverSession?.deviceName ?? '';
@@ -578,93 +692,85 @@ const App = () => {
                     </div>
 
                     {downloadReady ? (
-                  <div className="mt-6 space-y-4">
-                    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div>
-                        <p className="text-sm text-slate-400">Files ready</p>
-                        <p className="text-lg font-semibold">
-                          {receiverFiles.length} items · {formatBytes(receiverTotalBytes)}
-                        </p>
-                      </div>
-                      <span className="text-xs uppercase tracking-[0.3em] text-emerald-300">
-                        {receiverExpiryLabel}
-                      </span>
-                    </div>
-
-                    {receiverNeedsPassword && (
-                      <input
-                        type="password"
-                        placeholder="Enter password"
-                        value={receiverPassword}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                          setReceiverPassword(event.target.value)
-                        }
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none"
-                      />
-                    )}
-
-                    <ul className="space-y-3">
-                    <div className="mt-6 space-y-4">
-                      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4">
-                        <div>
-                          <p className="text-sm text-slate-400">Files ready</p>
-                          <p className="text-lg font-semibold">
-                            {receiverFiles.length} items · {formatBytes(receiverTotalBytes)}
-                          </p>
-                        </div>
-                        {receiverExpiryLabel && (
+                      <div className="mt-6 space-y-4">
+                        <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div>
+                            <p className="text-sm text-slate-400">Files ready</p>
+                            <p className="text-lg font-semibold">
+                              {receiverFiles.length} items · {formatBytes(receiverTotalBytes)}
+                            </p>
+                          </div>
                           <span className="text-xs uppercase tracking-[0.3em] text-emerald-300">
                             {receiverExpiryLabel}
                           </span>
-                        )}
-                      </div>
-
-                      {receiverNeedsPassword && (
-                        <input
-                          type="password"
-                          placeholder="Enter password"
-                          value={receiverPassword}
-                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                            setReceiverPassword(event.target.value)
-                          }
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none"
-                        />
-                      )}
-
-                      {receiverFiles.length > 0 ? (
-                        <ul className="space-y-3">
-                          {receiverFiles.map((file) => (
-                            <li
-                              key={file.id}
-                              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                            >
-                              <div>
-                                <p className="font-medium">{file.name}</p>
-                                <p className="text-sm text-slate-400">{formatBytes(file.size ?? 0)}</p>
-                              </div>
-                              <button className="text-sm text-blue-300">Download</button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-3 text-center text-sm text-slate-400">
-                          Sender hasn’t attached any files yet.
                         </div>
-                      )}
 
-                      <button
-                        className={clsx(
-                          'flex w-full items-center justify-center gap-3 rounded-2xl py-3 font-semibold transition',
-                          receiverFiles.length
-                            ? 'bg-gradient-to-r from-emerald-500 to-lime-500 text-emerald-950'
-                            : 'cursor-not-allowed border border-white/10 text-slate-400'
+                        {receiverNeedsPassword && (
+                          <input
+                            type="password"
+                            placeholder="Enter password"
+                            value={receiverPassword}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              setReceiverPassword(event.target.value)
+                            }
+                            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none"
+                          />
                         )}
-                        disabled={!receiverFiles.length}
-                      >
-                        <DownloadCloud className="h-5 w-5" />
-                        Download everything
-                      </button>
-                    </div>
+
+                        {receiverFiles.length > 0 ? (
+                          <ul className="space-y-3">
+                            {receiverFiles.map((file) => (
+                              <li
+                                key={file.id}
+                                className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/5 px-4 py-3 text-left text-sm"
+                              >
+                                <div>
+                                  <p className="font-medium">{file.name}</p>
+                                  <p className="text-slate-400">{formatBytes(file.size ?? 0)}</p>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    window.open(
+                                      `https://cloudbeamserver.onrender.com/api/download/${receiverSession?.id}/${file.id}`,
+                                      '_blank'
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30"
+                                >
+                                  <DownloadCloud className="h-3 w-3" />
+                                  Download
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-3 text-center text-sm text-slate-400">
+                            Sender hasn't attached any files yet.
+                          </div>
+                        )}
+
+                        <button
+                          className={clsx(
+                            'flex w-full items-center justify-center gap-3 rounded-2xl py-3 font-semibold transition',
+                            receiverFiles.length
+                              ? 'bg-gradient-to-r from-emerald-500 to-lime-500 text-emerald-950'
+                              : 'cursor-not-allowed border border-white/10 text-slate-400'
+                          )}
+                          disabled={!receiverFiles.length}
+                          onClick={() => {
+                            if (receiverSession) {
+                              window.open(
+                                `https://cloudbeamserver.onrender.com/api/download/${receiverSession.id}/all`,
+                                '_blank'
+                              );
+                            }
+                          }}
+                        >
+                          <DownloadCloud className="h-5 w-5" />
+                          Download everything
+                        </button>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <div className="mt-8 space-y-5 text-center">
@@ -695,119 +801,5 @@ const App = () => {
     </div>
   );
 };
-
-const StepperItem = ({ label, active }: { label: string; active?: boolean }) => (
-  <div
-    className={clsx(
-      'flex items-center gap-2 text-xs font-semibold tracking-[0.3em]',
-      active ? 'text-white' : 'text-slate-500'
-    )}
-  >
-    <span className={clsx('h-2 w-2 rounded-full', active ? 'bg-white' : 'bg-slate-600')} />
-    {label.toUpperCase()}
-  </div>
-);
-
-const ToggleCard = ({
-  title,
-  description,
-  icon,
-  active,
-  onToggle,
-}: {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  active?: boolean;
-  onToggle: () => void;
-}) => (
-  <button
-    onClick={onToggle}
-    type="button"
-    className={clsx(
-      'flex w-full items-start gap-4 rounded-3xl border px-5 py-4 text-left transition',
-      active
-        ? 'border-blue-500/40 bg-blue-500/10'
-        : 'border-white/10 bg-white/5 hover:border-white/30'
-    )}
-  >
-    <span
-      className={clsx(
-        'rounded-2xl p-3',
-        active ? 'bg-blue-500/20 text-blue-200' : 'bg-white/10 text-slate-200'
-      )}
-    >
-      {icon}
-    </span>
-    <div>
-      <p className="font-semibold">{title}</p>
-      <p className="text-sm text-slate-400">{description}</p>
-    </div>
-  </button>
-);
-
-const ProgressBar = ({ progress, status }: { progress: number; status: SessionStatus }) => (
-  <div className="space-y-3">
-    <div className="flex items-center justify-between text-sm text-slate-300">
-      <span>{status === 'ready' ? 'Upload complete' : 'Uploading files'}</span>
-      <span>{progress}%</span>
-    </div>
-    <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-      <div
-        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all"
-        style={{ width: `${progress}%` }}
-      />
-    </div>
-  </div>
-);
-
-const RoleCard = ({
-  title,
-  description,
-  accent,
-  icon,
-  onClick,
-}: {
-  title: string;
-  description: string;
-  accent: string;
-  icon: React.ReactNode;
-  onClick: () => void;
-}) => (
-  <button
-    onClick={onClick}
-    className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 text-left transition hover:border-white/40"
-    type="button"
-  >
-    <div className="pointer-events-none absolute inset-0 opacity-60">
-      <div className={clsx('absolute inset-0 rounded-3xl bg-gradient-to-br', accent)} />
-    </div>
-    <div className="relative flex h-full flex-col justify-between gap-4">
-      <div className="inline-flex items-center gap-3 rounded-full border border-white/20 px-4 py-1 text-xs uppercase tracking-[0.3em] text-white/80">
-        {icon}
-        {title}
-      </div>
-      <p className="text-lg text-white/90">{description}</p>
-    </div>
-  </button>
-);
-
-const glassPanelClass =
-  'rounded-[32px] border border-white/10 bg-white/5 p-6 text-white shadow-glass backdrop-blur-xl';
-
-const styles = document.createElement('style');
-styles.innerHTML = `
-  .glass-panel {
-    border-radius: 32px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-    box-shadow: 0 25px 60px rgba(5, 6, 10, 0.25);
-    backdrop-filter: blur(20px);
-  }
-`;
-if (typeof document !== 'undefined' && !document.getElementById('glass-style')) {
-  styles.id = 'glass-style';
-  document.head.appendChild(styles);
-}
 
 export default App;
